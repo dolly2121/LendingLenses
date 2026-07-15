@@ -123,5 +123,6 @@ Each phase is independently buildable and independently testable. No phase depen
 In priority order, each independently skippable:
 1. Run summary table at the end of `run_pipeline.py`, surfaced in the dashboard quality panel
 2. Optional audio: faster-whisper behind the existing endpoint. The .txt path must remain unchanged. Ships only if it survives two full rehearsals
+3. Rebuild the dashboard's loan summary view in Power BI Desktop (free, local), pointing at the same `gold_loan_summary` Delta table via the Delta connector. Streamlit stays as the primary rehearsed demo; Power BI is a bonus if time allows, strengthens the "this maps to Power BI" claim into "this is Power BI."
 
 **Definition of Done**: item by item, demo remains stable after each addition.
