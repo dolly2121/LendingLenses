@@ -18,13 +18,26 @@ TRANSCRIPTS_DIR = LANDING_DIR / "transcripts"
 STATES = ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"]
 LOAN_TYPES = ["personal", "car", "home_improvement", "debt_consolidation", "business"]
 STATUSES = ["approved", "pending", "declined"]
+CHANNELS = ["direct", "broker"]
+RATE_MIN, RATE_MAX = 5.5, 14.0
+# Base rate per loan_type stands in for a risk_band that doesn't exist yet at Bronze
+# (risk_band is derived later in Silver from loan_amount/loan_type, Phases.md Phase 3).
+# Secured-ish loan types (car, home_improvement) sit lower; unsecured/variable-risk
+# types (personal, debt_consolidation, business) sit higher, per typical AU non-bank rates.
+BASE_RATE_BY_TYPE = {
+    "car": 7.0,
+    "home_improvement": 6.5,
+    "debt_consolidation": 9.5,
+    "personal": 10.0,
+    "business": 9.0,
+}
 FIRST_NAMES = ["Sarah", "James", "Priya", "Liam", "Olivia", "Noah", "Mia", "Ethan",
                "Grace", "Lucas", "Chloe", "Mason", "Ava", "Jack", "Isla", "Ryan"]
 LAST_NAMES = ["Mitchell", "Chen", "Nair", "Walker", "Bennett", "Ford", "Reid",
               "Nguyen", "Carter", "Hughes", "Patel", "Cooper", "Sharma", "Ellis"]
 
-CSV_COLUMNS = ["loan_id", "customer_name", "state", "loan_amount",
-               "loan_type", "application_date", "status"]
+CSV_COLUMNS = ["loan_id", "customer_name", "state", "loan_amount", "loan_type",
+               "interest_rate", "channel", "application_date", "status"]
 
 
 def _synthetic_name(rng: random.Random) -> str:
@@ -35,16 +48,24 @@ def _random_date(rng: random.Random, start: date, end: date) -> date:
     return start + timedelta(days=rng.randint(0, (end - start).days))
 
 
+def _interest_rate(rng: random.Random, loan_type: str) -> float:
+    rate = BASE_RATE_BY_TYPE[loan_type] + rng.uniform(-1.5, 2.5)
+    return round(min(max(rate, RATE_MIN), RATE_MAX), 2)
+
+
 def generate_rows() -> list[dict]:
     rng = random.Random(SEED)
     rows = []
     for i in range(1, ROW_COUNT + 1):
+        loan_type = rng.choice(LOAN_TYPES)
         rows.append({
             "loan_id": f"LOAN-{i:04d}",
             "customer_name": _synthetic_name(rng),
             "state": rng.choice(STATES),
             "loan_amount": round(rng.uniform(5000, 500000), 2),
-            "loan_type": rng.choice(LOAN_TYPES),
+            "loan_type": loan_type,
+            "interest_rate": _interest_rate(rng, loan_type),
+            "channel": rng.choice(CHANNELS),
             "application_date": _random_date(rng, TODAY - timedelta(days=730), TODAY).isoformat(),
             "status": rng.choice(STATUSES),
         })
@@ -73,6 +94,7 @@ def write_loans_csv(rows: list[dict]) -> Path:
         for row in rows:
             row = dict(row)
             row["loan_amount"] = f"{row['loan_amount']:.2f}"
+            row["interest_rate"] = f"{row['interest_rate']:.2f}"
             writer.writerow(row)
     return out_path
 
