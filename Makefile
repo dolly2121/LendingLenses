@@ -13,7 +13,8 @@ service:
 	uvicorn ai_service.main:app --reload
 
 demo:
-	python -m pipeline.run_pipeline
+	pip install -r requirements.txt
+	python -m pipeline.demo
 
 test:
 	pytest

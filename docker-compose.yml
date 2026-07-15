@@ -1,0 +1,35 @@
+services:
+  # One-shot: populates the shared data/lake volume before dashboard/service
+  # start. Reuses the ai_service image since it already has pipeline/ baked
+  # in - no third Dockerfile needed.
+  pipeline:
+    build:
+      context: .
+      dockerfile: ai_service/Dockerfile
+    command: ["python", "-m", "pipeline.run_pipeline"]
+    volumes:
+      - ./data:/app/data
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      pipeline:
+        condition: service_completed_successfully
+
+  service:
+    build:
+      context: .
+      dockerfile: ai_service/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      pipeline:
+        condition: service_completed_successfully
