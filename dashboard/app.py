@@ -17,6 +17,7 @@ from pipeline import lake_io
 GOLD_LOAN_SUMMARY = REPO_ROOT / "data" / "lake" / "gold" / "gold_loan_summary"
 GOLD_CALL_INSIGHTS = REPO_ROOT / "data" / "lake" / "gold" / "gold_call_insights"
 DQ_AUDIT = REPO_ROOT / "data" / "lake" / "silver" / "dq_audit"
+RUN_SUMMARY = REPO_ROOT / "data" / "lake" / "silver" / "run_summary"
 
 # Design.md palette
 NAVY, TEAL, AMBER, RED, BG, TEXT = "#1B2A4A", "#2A9D8F", "#E9A03B", "#C1494B", "#F7F8FA", "#2B2D31"
@@ -48,7 +49,8 @@ def _read_with_retry(table_path: Path, retries: int = 2, backoff: float = 0.3) -
 
 
 def _load_all() -> dict[str, pl.DataFrame]:
-    tables = {"loan_summary": GOLD_LOAN_SUMMARY, "call_insights": GOLD_CALL_INSIGHTS, "dq_audit": DQ_AUDIT}
+    tables = {"loan_summary": GOLD_LOAN_SUMMARY, "call_insights": GOLD_CALL_INSIGHTS,
+              "dq_audit": DQ_AUDIT, "run_summary": RUN_SUMMARY}
     last_good = st.session_state.get("data", {})
     return {
         key: (_read_with_retry(path) if _read_with_retry(path) is not None else last_good.get(key, pl.DataFrame()))
@@ -64,6 +66,7 @@ if st.button("Refresh") or "data" not in st.session_state:
 loan_summary = st.session_state.data["loan_summary"]
 call_insights = st.session_state.data["call_insights"]
 dq_audit = st.session_state.data["dq_audit"]
+run_summary = st.session_state.data["run_summary"]
 
 # --- Row 1: metric tiles ---
 total_loans = int(loan_summary["loan_count"].sum()) if loan_summary.height else 0
@@ -128,6 +131,22 @@ else:
 
 # --- Row 4: collapsible data quality panel ---
 with st.expander("Data Quality"):
+    # Run summary (Phases.md Phase 8, item 1): the latest pipeline run's
+    # landed/passed/quarantined snapshot, not the per-check breakdown below.
+    if run_summary.height:
+        latest = run_summary.sort("run_timestamp", descending=True).row(0, named=True)
+        st.markdown(
+            f"**Last run** ({latest['run_timestamp']:%Y-%m-%d %H:%M UTC}): "
+            f"loans {latest['loans_landed']} landed / {latest['loans_passed']} passed / "
+            f"{latest['loans_quarantined']} quarantined &nbsp;&nbsp; "
+            f"calls {latest['calls_landed']} landed / {latest['calls_passed']} passed / "
+            f"{latest['calls_quarantined']} quarantined &nbsp;&nbsp; "
+            f"gold {latest['gold_loan_summary_rows']} summary rows",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.info("No run summary yet. Run the pipeline, then click Refresh.")
+
     # Quarantine total is derived from dq_audit's failed_count, not a direct
     # read of the quarantine table: FR7 restricts the dashboard to Gold and
     # audit tables only.
