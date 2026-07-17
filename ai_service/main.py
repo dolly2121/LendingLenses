@@ -10,6 +10,7 @@ from pathlib import Path
 
 import polars as pl
 from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from ai_service.nlp_flags import complaint_flag, hardship_flag, mask_names, sentiment_score
 from pipeline import lake_io
@@ -23,6 +24,14 @@ app = FastAPI(title="LendingLens AI Service")
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/record.html")
+def record_page() -> FileResponse:
+    # Dev/test tool only (Phase 8, browser-mic whisper.js path), not a demo
+    # moment. Same-origin static serve so its fetch() to /process-call needs
+    # no CORS config. Does not touch process_call's own logic.
+    return FileResponse(Path(__file__).parent / "record.html")
 
 
 @app.post("/process-call")

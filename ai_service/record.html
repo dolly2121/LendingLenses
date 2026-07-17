@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LendingLens - Browser Mic Test (dev tool, not the rehearsed demo)</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #2B2D31; }
+  h1 { color: #1B2A4A; font-size: 1.3rem; }
+  .warn { background: #FFF4E5; border: 1px solid #E9A03B; padding: 0.75rem 1rem; border-radius: 6px; font-size: 0.9rem; }
+  button { font-size: 1rem; padding: 0.6rem 1.2rem; border-radius: 6px; border: none; cursor: pointer; margin-right: 0.5rem; }
+  #recordBtn { background: #C1494B; color: white; }
+  #sendBtn { background: #2A9D8F; color: white; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  #status { margin: 1rem 0; color: #2B2D31; font-style: italic; }
+  textarea { width: 100%; min-height: 6rem; font-size: 1rem; padding: 0.5rem; box-sizing: border-box; }
+  #result { margin-top: 1rem; padding: 0.75rem 1rem; border-radius: 6px; background: #F7F8FA; }
+</style>
+</head>
+<body>
+
+<h1>LendingLens - Browser Mic Test</h1>
+
+<p class="warn">
+  <strong>Dev/test tool, not part of the rehearsed demo.</strong> Transcription runs
+  locally in this tab (whisper.js / transformers.js, WASM, nothing sent anywhere
+  until you press Send). Name masking downstream is keyword-based against a fixed
+  synthetic name list (Sarah, James, Priya, ... see pipeline/generate_data.py) - not
+  general NER. It will NOT reliably mask a real name. Review the transcript before
+  sending; never use a real name here (Rules.md R3a).
+</p>
+
+<p>
+  <button id="recordBtn">Record 5 seconds</button>
+  <button id="sendBtn" disabled>Send to AI service</button>
+</p>
+
+<div id="status">Idle.</div>
+
+<textarea id="transcript" placeholder="Transcribed text will appear here - edit before sending if needed."></textarea>
+
+<div id="result"></div>
+
+<script type="module">
+  import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/+esm";
+
+  // Model choice: tiny.en, not the "small" faster-whisper size originally
+  // asked for - browser WASM inference is much slower than native, so a
+  // smaller model keeps this usable for a live test. Swap the string below
+  // for "Xenova/whisper-small" if you want closer parity and can tolerate
+  // a slower, heavier download.
+  const MODEL_ID = "Xenova/whisper-tiny.en";
+  const SERVICE_URL = "http://localhost:8000/process-call";
+  const RECORD_MS = 5000;
+
+  const recordBtn = document.getElementById("recordBtn");
+  const sendBtn = document.getElementById("sendBtn");
+  const statusEl = document.getElementById("status");
+  const transcriptEl = document.getElementById("transcript");
+  const resultEl = document.getElementById("result");
+
+  function setStatus(text) { statusEl.textContent = text; }
+
+  let transcriber = null;
+  async function getTranscriber() {
+    if (!transcriber) {
+      setStatus("Loading whisper model (first run only, downloads from CDN)...");
+      transcriber = await pipeline("automatic-speech-recognition", MODEL_ID);
+    }
+    return transcriber;
+  }
+
+  // Exposed on window so this step can be exercised directly from the
+  // console without needing a live microphone (useful for testing).
+  window.transcribeFloat32Audio = async function (float32Audio) {
+    const t = await getTranscriber();
+    const out = await t(float32Audio);
+    return out.text.trim();
+  };
+
+  async function recordAndTranscribe() {
+    recordBtn.disabled = true;
+    sendBtn.disabled = true;
+    resultEl.textContent = "";
+    try {
+      setStatus("Requesting microphone access...");
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks = [];
+      recorder.ondataavailable = (e) => chunks.push(e.data);
+      const stopped = new Promise((resolve) => (recorder.onstop = resolve));
+
+      recorder.start();
+      setStatus(`Recording for ${RECORD_MS / 1000}s...`);
+      await new Promise((resolve) => setTimeout(resolve, RECORD_MS));
+      recorder.stop();
+      await stopped;
+      stream.getTracks().forEach((t) => t.stop());
+
+      setStatus("Decoding audio...");
+      const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+      const arrayBuffer = await blob.arrayBuffer();
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      const float32Audio = audioBuffer.getChannelData(0);
+
+      setStatus("Transcribing locally (whisper.js)...");
+      const text = await window.transcribeFloat32Audio(float32Audio);
+
+      transcriptEl.value = text;
+      setStatus(text ? "Done. Review the transcript, then Send." : "Done, but got empty text - try again.");
+      sendBtn.disabled = !text;
+    } catch (err) {
+      setStatus("Error: " + err.message);
+    } finally {
+      recordBtn.disabled = false;
+    }
+  }
+
+  // Exposed on window so this step can be exercised directly from the
+  // console without needing a live microphone (useful for testing).
+  window.sendTranscriptToService = async function (text) {
+    const blob = new Blob([text], { type: "text/plain" });
+    const formData = new FormData();
+    formData.append("file", blob, `mic_recording_${Date.now()}.txt`);
+    const response = await fetch(SERVICE_URL, { method: "POST", body: formData });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.detail || `service returned ${response.status}`);
+    return body;
+  };
+
+  recordBtn.addEventListener("click", recordAndTranscribe);
+
+  sendBtn.addEventListener("click", async () => {
+    sendBtn.disabled = true;
+    setStatus("Sending to AI service...");
+    try {
+      const result = await window.sendTranscriptToService(transcriptEl.value);
+      resultEl.textContent =
+        `call_id: ${result.call_id} | hardship_flag: ${result.hardship_flag} | complaint_flag: ${result.complaint_flag}`;
+      setStatus("Sent. Refresh the dashboard to see it in Call Insights.");
+    } catch (err) {
+      setStatus("Error sending: " + err.message);
+      sendBtn.disabled = false;
+    }
+  });
+</script>
+
+</body>
+</html>
