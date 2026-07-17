@@ -17,6 +17,7 @@ SILVER_LOANS = REPO_ROOT / "data" / "lake" / "silver" / "silver_loans"
 GOLD_LOAN_SUMMARY = REPO_ROOT / "data" / "lake" / "gold" / "gold_loan_summary"
 GOLD_CALL_INSIGHTS = REPO_ROOT / "data" / "lake" / "gold" / "gold_call_insights"
 GOLD_LOAN_OPS = REPO_ROOT / "data" / "lake" / "gold" / "gold_loan_ops"
+GOLD_CHANNEL_BY_STATE = REPO_ROOT / "data" / "lake" / "gold" / "gold_channel_by_state"
 
 # strict=True: no column beyond this exact set may exist. This is the guard
 # against a direct identifier ever leaking into Gold (Architecture.md section 4,
@@ -51,6 +52,17 @@ GOLD_LOAN_OPS_SCHEMA = DataFrameSchema({
     "loan_count": Column(int),
     "total_amount": Column(float),
     "avg_amount": Column(float),
+}, strict=True)
+
+# New table, added by explicit human request (not part of the Phase 4 frozen
+# set). state is class I in silver_loans but, like gold_loan_summary, this is
+# an aggregate with no per-loan rows - no identifier survives (Rules R3,
+# Architecture.md section 4: "Gold is aggregate or flag level only").
+GOLD_CHANNEL_BY_STATE_SCHEMA = DataFrameSchema({
+    "state": Column(str),
+    "channel": Column(str),
+    "loan_count": Column(int),
+    "total_amount": Column(float),
 }, strict=True)
 
 
@@ -99,6 +111,27 @@ def build_loan_ops() -> int:
     return ops.height
 
 
+def build_channel_by_state() -> int:
+    """Aggregated by state and channel. Idempotent, same compute-once pattern
+    as build_loan_summary/build_loan_ops. Does not touch any existing Gold
+    table (Rules R7) - a separate table."""
+    if lake_io.table_exists(GOLD_CHANNEL_BY_STATE):
+        return 0
+
+    silver = lake_io.read(SILVER_LOANS)
+    by_state_channel = (
+        silver.group_by(["state", "channel"])
+        .agg(
+            pl.len().cast(pl.Int64).alias("loan_count"),
+            pl.col("loan_amount").sum().alias("total_amount"),
+        )
+        .select("state", "channel", "loan_count", "total_amount")
+    )
+    GOLD_CHANNEL_BY_STATE_SCHEMA.validate(by_state_channel)
+    lake_io.append(GOLD_CHANNEL_BY_STATE, by_state_channel)
+    return by_state_channel.height
+
+
 def init_call_insights() -> None:
     """Initialised empty with the agreed schema; the AI service appends rows
     to this table via lake_io in Phase 6. Idempotent: no-op if it already
@@ -122,8 +155,9 @@ def main() -> None:
     rows = build_loan_summary()
     init_call_insights()
     build_loan_ops()
-    # Console line unchanged (Design.md's rehearsed demo format) - gold_loan_ops
-    # is a new, non-demo table, not part of the scripted moments.
+    build_channel_by_state()
+    # Console line unchanged (Design.md's rehearsed demo format) - the new
+    # Gold tables aren't part of the scripted demo moments.
     print(f"GOLD    summary: {rows} rows            call_insights: ready")
 
 
