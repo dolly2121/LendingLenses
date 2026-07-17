@@ -39,6 +39,12 @@ GOLD_CALL_INSIGHTS_SCHEMA = DataFrameSchema({
     "sentiment_score": Column(float),
     "hardship_flag": Column(bool),
     "complaint_flag": Column(bool),
+    # enquiry_type added by explicit human request (Rules R7 - Phase 4 frozen
+    # contract change, authorized). hardship_flag/complaint_flag kept as-is
+    # for backward compatibility; this must match ai_service/call_pipeline.py's
+    # publish_gold() column-for-column, or the live writer and this module's
+    # empty-table init below disagree on schema (see init_call_insights()).
+    "enquiry_type": Column(str),
     "processed_at": Column(pl.Datetime("us", "UTC")),
 }, strict=True)
 
@@ -145,6 +151,7 @@ def init_call_insights() -> None:
         "sentiment_score": pl.Float64,
         "hardship_flag": pl.Boolean,
         "complaint_flag": pl.Boolean,
+        "enquiry_type": pl.Utf8,
         "processed_at": pl.Datetime("us", "UTC"),
     })
     GOLD_CALL_INSIGHTS_SCHEMA.validate(empty)

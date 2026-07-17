@@ -51,4 +51,5 @@ async def process_call(file: UploadFile) -> dict:
         "call_id": call_id,
         "hardship_flag": bool(silver_row["hardship_flag"]),
         "complaint_flag": bool(silver_row["complaint_flag"]),
+        "enquiry_type": silver_row["enquiry_type"],
     }

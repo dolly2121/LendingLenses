@@ -66,7 +66,7 @@ PII class: **D** = direct identifier, **I** = indirect, **N** = none.
 
 **gold_loan_summary**: state, risk_band, loan_count, total_amount, avg_amount, last_updated. *No identifiers of any class.*
 
-**gold_call_insights**: call_id (I), transcript_masked, sentiment_score, hardship_flag, complaint_flag, processed_at
+**gold_call_insights**: call_id (I), transcript_masked, sentiment_score, hardship_flag, complaint_flag, enquiry_type, processed_at. `enquiry_type` added 2026-07-17 (human-authorized change to this frozen contract, Rules R7): keyword-based classification into general_enquiry, hardship, complaint, emi_query, account_update, or other - hardship_flag/complaint_flag kept unchanged for backward compatibility
 
 Raw Bronze retains original values including synthetic names. Silver applies masking. Gold is aggregate or flag level only. This three zone privacy posture is itself a demo talking point.
 

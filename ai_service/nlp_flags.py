@@ -17,6 +17,21 @@ _analyzer = SentimentIntensityAnalyzer()
 
 HARDSHIP_KEYWORDS = ["hardship", "lost my job", "struggling", "fallen behind", "can't afford"]
 COMPLAINT_KEYWORDS = ["complaint", "unacceptable", "misled", "escalate"]
+EMI_QUERY_KEYWORDS = ["emi", "monthly instalment", "monthly installment", "instalment amount",
+                      "installment amount", "how much do i owe", "minimum payment"]
+ACCOUNT_UPDATE_KEYWORDS = ["update my address", "change my address", "update my details",
+                           "change my details", "update my phone", "change my phone",
+                           "update my email", "change of address", "account details"]
+GENERAL_ENQUIRY_KEYWORDS = ["status of my", "check the status", "loan application",
+                            "just wanted an update", "checking on", "any update on",
+                            "interest rate", "repayment schedule"]
+
+ENQUIRY_TYPE_COMPLAINT = "complaint"
+ENQUIRY_TYPE_HARDSHIP = "hardship"
+ENQUIRY_TYPE_EMI_QUERY = "emi_query"
+ENQUIRY_TYPE_ACCOUNT_UPDATE = "account_update"
+ENQUIRY_TYPE_GENERAL = "general_enquiry"
+ENQUIRY_TYPE_OTHER = "other"
 
 _NAME_PATTERN = re.compile(r"\b(" + "|".join(re.escape(n) for n in FIRST_NAMES + LAST_NAMES) + r")\b")
 
@@ -33,6 +48,27 @@ def hardship_flag(transcript: str) -> bool:
 def complaint_flag(transcript: str) -> bool:
     lowered = transcript.lower()
     return any(keyword in lowered for keyword in COMPLAINT_KEYWORDS)
+
+
+def classify_enquiry_type(transcript: str) -> str:
+    """Keyword-based, same approach and honesty caveat as hardship_flag/
+    complaint_flag - not general NLU. When multiple categories' keywords
+    match, complaint and hardship take precedence over the others: they are
+    the most sensitive/actionable categories for a lender, matching this
+    project's existing hardship/complaint-first demo narrative.
+    """
+    lowered = transcript.lower()
+    if any(keyword in lowered for keyword in COMPLAINT_KEYWORDS):
+        return ENQUIRY_TYPE_COMPLAINT
+    if any(keyword in lowered for keyword in HARDSHIP_KEYWORDS):
+        return ENQUIRY_TYPE_HARDSHIP
+    if any(keyword in lowered for keyword in EMI_QUERY_KEYWORDS):
+        return ENQUIRY_TYPE_EMI_QUERY
+    if any(keyword in lowered for keyword in ACCOUNT_UPDATE_KEYWORDS):
+        return ENQUIRY_TYPE_ACCOUNT_UPDATE
+    if any(keyword in lowered for keyword in GENERAL_ENQUIRY_KEYWORDS):
+        return ENQUIRY_TYPE_GENERAL
+    return ENQUIRY_TYPE_OTHER
 
 
 def mask_names(transcript: str) -> str:

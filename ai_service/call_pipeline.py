@@ -9,7 +9,7 @@ from pathlib import Path
 
 import polars as pl
 
-from ai_service.nlp_flags import complaint_flag, hardship_flag, mask_names, sentiment_score
+from ai_service.nlp_flags import classify_enquiry_type, complaint_flag, hardship_flag, mask_names, sentiment_score
 from pipeline import lake_io
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -40,6 +40,9 @@ def process_silver(call_id: str, raw_transcript: str) -> dict:
         "sentiment_score": sentiment_score(raw_transcript),
         "hardship_flag": hardship_flag(raw_transcript),
         "complaint_flag": complaint_flag(raw_transcript),
+        # Existing hardship_flag/complaint_flag columns kept unchanged for
+        # backward compatibility - enquiry_type is additive, not a replacement.
+        "enquiry_type": classify_enquiry_type(raw_transcript),
         "processed_at": datetime.now(timezone.utc),
     }
     lake_io.append(SILVER_CALLS_LIVE, pl.DataFrame([row]))
@@ -47,15 +50,19 @@ def process_silver(call_id: str, raw_transcript: str) -> dict:
 
 
 def publish_gold(silver_row: dict) -> None:
-    """gold_call_insights' schema is unchanged (frozen, Rules R7) - only the
-    source of writes changes, from a direct AI-service write to being
-    populated from silver_calls_live."""
+    """gold_call_insights' schema keeps hardship_flag/complaint_flag
+    unchanged and adds enquiry_type (human-authorized change to the Phase 4
+    frozen contract, Rules R7 - see pipeline/gold.py's matching schema
+    update, required so the batch-created empty table and this live writer
+    agree on columns). Only the write source changed at Phase 8 - from a
+    direct AI-service write to being populated from silver_calls_live."""
     gold_row = pl.DataFrame([{
         "call_id": silver_row["call_id"],
         "transcript_masked": silver_row["masked_transcript"],
         "sentiment_score": silver_row["sentiment_score"],
         "hardship_flag": silver_row["hardship_flag"],
         "complaint_flag": silver_row["complaint_flag"],
+        "enquiry_type": silver_row["enquiry_type"],
         "processed_at": silver_row["processed_at"],
     }])
     lake_io.append(GOLD_CALL_INSIGHTS, gold_row)
