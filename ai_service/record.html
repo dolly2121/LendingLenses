@@ -30,7 +30,7 @@
 </p>
 
 <p>
-  <button id="recordBtn">Record 5 seconds</button>
+  <button id="recordBtn">Record 60 seconds</button>
   <button id="sendBtn" disabled>Send to AI service</button>
 </p>
 
@@ -50,7 +50,24 @@
   // a slower, heavier download.
   const MODEL_ID = "Xenova/whisper-tiny.en";
   const SERVICE_URL = "http://localhost:8000/process-call";
-  const RECORD_MS = 5000;
+  // 60s, tested stable (see Memory.md 2026-07-17): without chunk_length_s/
+  // stride_length_s/return_timestamps below, Whisper's fixed 30s encoder
+  // window silently truncates anything past ~30s - not a crash, just
+  // dropped audio (confirmed: a 32.3s clip lost its last ~2s, a 52.2s clip
+  // lost everything past ~30s). With those options set, tested correct and
+  // stable up to 52.2s (no crash, no hang, ~117-284MB heap, ~8-12s to
+  // transcribe) - the 30s ceiling was a pipeline config gap, not a hard
+  // platform limit.
+  const RECORD_MS = 60000;
+  const TRANSCRIBE_OPTIONS = { chunk_length_s: 30, stride_length_s: 5, return_timestamps: true };
+
+  // Simple substring match on the finished transcript, not real intent
+  // detection - same "keyword based, not NER" honesty as nlp_flags.py.
+  const CLOSING_PHRASES = ["bye bye", "goodbye", "good bye", "take care", "have a good day", "talk soon"];
+  function hasClosingPhrase(text) {
+    const lowered = text.toLowerCase();
+    return CLOSING_PHRASES.some((phrase) => lowered.includes(phrase));
+  }
 
   const recordBtn = document.getElementById("recordBtn");
   const sendBtn = document.getElementById("sendBtn");
@@ -71,9 +88,9 @@
 
   // Exposed on window so this step can be exercised directly from the
   // console without needing a live microphone (useful for testing).
-  window.transcribeFloat32Audio = async function (float32Audio) {
+  window.transcribeFloat32Audio = async function (float32Audio, options) {
     const t = await getTranscriber();
-    const out = await t(float32Audio);
+    const out = await t(float32Audio, options);
     return out.text.trim();
   };
 
@@ -104,10 +121,16 @@
       const float32Audio = audioBuffer.getChannelData(0);
 
       setStatus("Transcribing locally (whisper.js)...");
-      const text = await window.transcribeFloat32Audio(float32Audio);
+      const text = await window.transcribeFloat32Audio(float32Audio, TRANSCRIBE_OPTIONS);
 
       transcriptEl.value = text;
-      setStatus(text ? "Done. Review the transcript, then Send." : "Done, but got empty text - try again.");
+      if (text && hasClosingPhrase(text)) {
+        resultEl.textContent = "Call ended.";
+        setStatus("Done - closing phrase detected. Review the transcript, then Send.");
+      } else {
+        resultEl.textContent = "";
+        setStatus(text ? "Done. Review the transcript, then Send." : "Done, but got empty text - try again.");
+      }
       sendBtn.disabled = !text;
     } catch (err) {
       setStatus("Error: " + err.message);
