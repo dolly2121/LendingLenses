@@ -30,7 +30,7 @@
 </p>
 
 <p>
-  <button id="recordBtn">Record 60 seconds</button>
+  <button id="recordBtn">Start Recording</button>
   <button id="sendBtn" disabled>Send to AI service</button>
 </p>
 
@@ -50,16 +50,23 @@
   // a slower, heavier download.
   const MODEL_ID = "Xenova/whisper-tiny.en";
   const SERVICE_URL = "http://localhost:8000/process-call";
-  // 60s, tested stable (see Memory.md 2026-07-17): without chunk_length_s/
-  // stride_length_s/return_timestamps below, Whisper's fixed 30s encoder
-  // window silently truncates anything past ~30s - not a crash, just
-  // dropped audio (confirmed: a 32.3s clip lost its last ~2s, a 52.2s clip
-  // lost everything past ~30s). With those options set, tested correct and
-  // stable up to 52.2s (no crash, no hang, ~117-284MB heap, ~8-12s to
+  // Without chunk_length_s/stride_length_s/return_timestamps below, Whisper's
+  // fixed 30s encoder window silently truncates anything past ~30s - not a
+  // crash, just dropped audio (confirmed: a 32.3s clip lost its last ~2s, a
+  // 52.2s clip lost everything past ~30s). With those options set, tested
+  // correct and stable up to 108.3s (no crash, no hang, ~274MB heap, ~38s to
   // transcribe) - the 30s ceiling was a pipeline config gap, not a hard
-  // platform limit.
-  const RECORD_MS = 60000;
+  // platform limit (see Memory.md 2026-07-17).
   const TRANSCRIBE_OPTIONS = { chunk_length_s: 30, stride_length_s: 5, return_timestamps: true };
+
+  // A fixed RECORD_MS timeout (previously 60000) cuts the *recording* off
+  // blind, independent of the chunking fix above: a real ~70s+ speaker had
+  // their second half never captured at all, since it stops MediaRecorder
+  // itself, not just transcription. Fix: the presenter clicks Stop when the
+  // call is actually done. MAX_RECORD_MS is a safety net only, tested stable
+  // at 108.3s (matches the transcription-side test above) - not the normal
+  // way a recording ends.
+  const MAX_RECORD_MS = 120000;
 
   // Simple substring match on the finished transcript, not real intent
   // detection - same "keyword based, not NER" honesty as nlp_flags.py.
@@ -94,10 +101,14 @@
     return out.text.trim();
   };
 
-  async function recordAndTranscribe() {
-    recordBtn.disabled = true;
+  // Set while a recording is in progress; null otherwise. Holds everything
+  // stopRecording() needs to tear down cleanly.
+  let activeRecording = null;
+
+  async function startRecording() {
     sendBtn.disabled = true;
     resultEl.textContent = "";
+    transcriptEl.value = "";
     try {
       setStatus("Requesting microphone access...");
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -105,10 +116,41 @@
       const chunks = [];
       recorder.ondataavailable = (e) => chunks.push(e.data);
       const stopped = new Promise((resolve) => (recorder.onstop = resolve));
+      const startedAt = performance.now();
 
       recorder.start();
-      setStatus(`Recording for ${RECORD_MS / 1000}s...`);
-      await new Promise((resolve) => setTimeout(resolve, RECORD_MS));
+
+      const timerId = setInterval(() => {
+        const elapsedSec = Math.floor((performance.now() - startedAt) / 1000);
+        const remainingSec = Math.max(0, Math.ceil((MAX_RECORD_MS - (performance.now() - startedAt)) / 1000));
+        setStatus(`Recording... ${elapsedSec}s elapsed. Click "Stop Recording" when the call ends (auto-stops in ${remainingSec}s as a safety net).`);
+      }, 1000);
+
+      const safetyTimeoutId = setTimeout(() => {
+        setStatus(`Safety net reached (${MAX_RECORD_MS / 1000}s) - stopping automatically.`);
+        stopRecording();
+      }, MAX_RECORD_MS);
+
+      activeRecording = { recorder, stream, chunks, stopped, timerId, safetyTimeoutId };
+      recordBtn.textContent = "Stop Recording";
+      recordBtn.disabled = false;
+      setStatus("Recording... 0s elapsed. Click \"Stop Recording\" when the call ends.");
+    } catch (err) {
+      setStatus("Error: " + err.message);
+      recordBtn.disabled = false;
+    }
+  }
+
+  async function stopRecording() {
+    if (!activeRecording) return;
+    const { recorder, stream, chunks, stopped, timerId, safetyTimeoutId } = activeRecording;
+    activeRecording = null;
+    clearInterval(timerId);
+    clearTimeout(safetyTimeoutId);
+    recordBtn.disabled = true;
+    recordBtn.textContent = "Start Recording";
+
+    try {
       recorder.stop();
       await stopped;
       stream.getTracks().forEach((t) => t.stop());
@@ -120,7 +162,7 @@
       const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
       const float32Audio = audioBuffer.getChannelData(0);
 
-      setStatus("Transcribing locally (whisper.js)...");
+      setStatus("Transcribing locally (whisper.js) - this can take a while for longer calls...");
       const text = await window.transcribeFloat32Audio(float32Audio, TRANSCRIBE_OPTIONS);
 
       transcriptEl.value = text;
@@ -151,7 +193,13 @@
     return body;
   };
 
-  recordBtn.addEventListener("click", recordAndTranscribe);
+  recordBtn.addEventListener("click", () => {
+    if (activeRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  });
 
   sendBtn.addEventListener("click", async () => {
     sendBtn.disabled = true;
