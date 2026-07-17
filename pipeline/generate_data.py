@@ -37,7 +37,8 @@ LAST_NAMES = ["Mitchell", "Chen", "Nair", "Walker", "Bennett", "Ford", "Reid",
               "Nguyen", "Carter", "Hughes", "Patel", "Cooper", "Sharma", "Ellis"]
 
 CSV_COLUMNS = ["loan_id", "customer_name", "state", "loan_amount", "loan_type",
-               "interest_rate", "channel", "application_date", "status"]
+               "interest_rate", "channel", "application_date", "loan_issue_date",
+               "first_reimbursement_date", "status"]
 
 
 def _synthetic_name(rng: random.Random) -> str:
@@ -53,11 +54,22 @@ def _interest_rate(rng: random.Random, loan_type: str) -> float:
     return round(min(max(rate, RATE_MIN), RATE_MAX), 2)
 
 
+def _loan_issue_date(rng: random.Random, application_date: date) -> date:
+    return application_date + timedelta(days=rng.randint(1, 14))
+
+
+def _first_reimbursement_date(rng: random.Random, loan_issue_date: date) -> date:
+    return loan_issue_date + timedelta(days=rng.randint(28, 32))
+
+
 def generate_rows() -> list[dict]:
     rng = random.Random(SEED)
     rows = []
     for i in range(1, ROW_COUNT + 1):
         loan_type = rng.choice(LOAN_TYPES)
+        application_date = _random_date(rng, TODAY - timedelta(days=730), TODAY)
+        loan_issue_date = _loan_issue_date(rng, application_date)
+        first_reimbursement_date = _first_reimbursement_date(rng, loan_issue_date)
         rows.append({
             "loan_id": f"LOAN-{i:04d}",
             "customer_name": _synthetic_name(rng),
@@ -66,7 +78,9 @@ def generate_rows() -> list[dict]:
             "loan_type": loan_type,
             "interest_rate": _interest_rate(rng, loan_type),
             "channel": rng.choice(CHANNELS),
-            "application_date": _random_date(rng, TODAY - timedelta(days=730), TODAY).isoformat(),
+            "application_date": application_date.isoformat(),
+            "loan_issue_date": loan_issue_date.isoformat(),
+            "first_reimbursement_date": first_reimbursement_date.isoformat(),
             "status": rng.choice(STATUSES),
         })
 

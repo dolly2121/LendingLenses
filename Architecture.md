@@ -58,7 +58,7 @@ The architectural claim being demonstrated: **one governed Gold layer is the con
 
 PII class: **D** = direct identifier, **I** = indirect, **N** = none.
 
-**silver_loans**: loan_id (I), customer_ref_hash (D, masked), state (I), loan_amount (N), loan_type (N), interest_rate (N), channel (N), risk_band (N, derived), application_date (I), status (N). No `customer_id`: nothing downstream needs it, so it is never generated (see Phases.md Phase 1)
+**silver_loans**: loan_id (I), customer_ref_hash (D, masked), state (I), loan_amount (N), loan_type (N), interest_rate (N), channel (N), risk_band (N, derived), application_date (I), loan_issue_date (I), first_reimbursement_date (I), status (N). No `customer_id`: nothing downstream needs it, so it is never generated (see Phases.md Phase 1)
 
 **quarantine**: source_table, source_row_id, offending_field, offending_value, check_name, reason, run_id, quarantined_at. Deliberately does NOT store the full raw row or a `record_json` blob: doing so would risk writing an unmasked synthetic name into a table this architecture calls trusted and PII-masked. Only the specific field that failed is stored
 
