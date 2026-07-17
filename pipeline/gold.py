@@ -16,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SILVER_LOANS = REPO_ROOT / "data" / "lake" / "silver" / "silver_loans"
 GOLD_LOAN_SUMMARY = REPO_ROOT / "data" / "lake" / "gold" / "gold_loan_summary"
 GOLD_CALL_INSIGHTS = REPO_ROOT / "data" / "lake" / "gold" / "gold_call_insights"
+GOLD_LOAN_OPS = REPO_ROOT / "data" / "lake" / "gold" / "gold_loan_ops"
 
 # strict=True: no column beyond this exact set may exist. This is the guard
 # against a direct identifier ever leaking into Gold (Architecture.md section 4,
@@ -38,6 +39,18 @@ GOLD_CALL_INSIGHTS_SCHEMA = DataFrameSchema({
     "hardship_flag": Column(bool),
     "complaint_flag": Column(bool),
     "processed_at": Column(pl.Datetime("us", "UTC")),
+}, strict=True)
+
+# New table, added by explicit human request (not part of the Phase 4 frozen
+# set - gold_loan_summary/gold_call_insights are untouched). Same no-PII
+# self-check as the other Gold tables (Rules R3): channel/loan_type are both
+# class N, no identifiers.
+GOLD_LOAN_OPS_SCHEMA = DataFrameSchema({
+    "channel": Column(str),
+    "loan_type": Column(str),
+    "loan_count": Column(int),
+    "total_amount": Column(float),
+    "avg_amount": Column(float),
 }, strict=True)
 
 
@@ -64,6 +77,28 @@ def build_loan_summary() -> int:
     return summary.height
 
 
+def build_loan_ops() -> int:
+    """Aggregated by channel and loan_type. Idempotent, same compute-once
+    pattern as build_loan_summary. Does not touch gold_loan_summary (frozen,
+    Rules R7) - a separate table."""
+    if lake_io.table_exists(GOLD_LOAN_OPS):
+        return 0
+
+    silver = lake_io.read(SILVER_LOANS)
+    ops = (
+        silver.group_by(["channel", "loan_type"])
+        .agg(
+            pl.len().cast(pl.Int64).alias("loan_count"),
+            pl.col("loan_amount").sum().alias("total_amount"),
+            pl.col("loan_amount").mean().alias("avg_amount"),
+        )
+        .select("channel", "loan_type", "loan_count", "total_amount", "avg_amount")
+    )
+    GOLD_LOAN_OPS_SCHEMA.validate(ops)
+    lake_io.append(GOLD_LOAN_OPS, ops)
+    return ops.height
+
+
 def init_call_insights() -> None:
     """Initialised empty with the agreed schema; the AI service appends rows
     to this table via lake_io in Phase 6. Idempotent: no-op if it already
@@ -86,6 +121,9 @@ def init_call_insights() -> None:
 def main() -> None:
     rows = build_loan_summary()
     init_call_insights()
+    build_loan_ops()
+    # Console line unchanged (Design.md's rehearsed demo format) - gold_loan_ops
+    # is a new, non-demo table, not part of the scripted moments.
     print(f"GOLD    summary: {rows} rows            call_insights: ready")
 
 
